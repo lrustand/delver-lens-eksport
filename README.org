@@ -1,0 +1,186 @@
+* Oppsett av verktøy
+
+Denne guiden bruker WSL, USBIPD, og ADB.
+
+** Installere WSL
+
+I Powershell:
+
+#+begin_src powershell
+  wsl --install debian
+#+end_src
+
+*** Installere verktøy i WSL
+
+Start WSL enten gjennom start-menyen eller ved å kjøre =wsl= fra
+Powershell.
+
+#+begin_src sh
+  sudo apt update
+  sudo apt install adb sqlite3 git
+#+end_src
+
+** Enable ADB / USB debugging på telefonen
+
+USB debugging ligger i "Developer options"-menyen. Denne er skjult som
+default, men kan skrus på ved å gå til "Settings > About phone >
+Software information" og trykke mange ganger fort på "Build
+number". Det vil komme opp en melding som sier at "Developer options"
+har blitt enablet, og det vil dukke opp en ny meny helt i bunnen av
+"Settings" som heter "Developer options".
+
+Da kan vi skru på "USB degugging" ved å gå til "Settings > Developer
+options" og skru på "USB debugging".
+
+** USB passthrough fra Windows til WSL
+
+Verktøyet USBIPD kan brukes for å koble en USB-enhet direkte til Linux
+inne i WSL sånn at den kommuniserer direkte med hardwaren gjennom den
+vanlige Linux-driveren. Fra Linux sin side blir dette likt som å kjøre
+rett på stålet.
+
+Installer siste versjon av USBIPD herfra:
+
+https://github.com/dorssel/usbipd-win/releases/latest
+
+Eventuelt se Microsoft sin dokumentasjon for mer informasjon:
+
+https://learn.microsoft.com/en-us/windows/wsl/connect-usb
+
+
+* Koble til telefonen
+
+** Tillate USB-tilkoblingen fra telefonen
+
+Koble telefonen til PCen gjennom en USB-kabel. Hvis du har skrudd på
+USB debugging på telefonen vil du nå bli promptet om du vil tillate at
+PCen får tilgang til USB debugging. Hvis ingenting skjer, sjekk at
+kabelen faktisk har data-ledere.
+
+** Gi USB-enheten til WSL
+
+I Powershell:
+
+Finn USB-enheten og noter ned hardware id:
+
+#+begin_src sh
+  usbipd.exe list
+#+end_src
+
+Koble enheten til WSL:
+
+#+begin_src sh
+  usbipd.exe attach --wsl --hardware-id XXXX:XXXX
+#+end_src
+
+
+I WSL:
+
+Dobbeltsjekk at den dukker opp som en USB-enhet inne i WSL:
+
+#+begin_src sh
+  lsusb
+#+end_src
+
+
+** Sjekke at ADB får koblet til telefonen
+
+I WSL:
+
+List ut alle enheter som ADB finner:
+
+#+begin_src sh
+  adb devices -l
+#+end_src
+
+* Hente ut data
+
+** Eksportere database fra Delver Lens
+
+På telefonen:
+
+Gå til "hamburgermenyen" i øverste venstre hjørne i Delver Lens, velg
+"Create backup file" og trykk "Download". Dette vil legge en =*.dlens=
+-fil i Download-mappa på telefonen. (Ingen "s" på slutten av "Download"!)
+
+** Hente ut database fra telefonen via ADB
+
+ADB kan brukes for å hente den eksporterte fila fra telefonen til PCen.
+
+I WSL:
+
+#+begin_src sh
+  adb pull /storage/emulated/0/Download/2025_Jun_29_17-34_backup.dlens
+#+end_src
+
+=adb pull= støtter desverre ikke wildcards, så vi må bruke hele navnet
+på den eksporterte fila. Hvis ikke du vet navnet kan du eventuelt
+bruke =adb shell= for å finne det, for eksempel sånn her:
+
+#+begin_src sh
+  adb shell ls /storage/emulated/0/Download/*.dlens
+#+end_src
+
+Kan også logge inn i shell på telefonen ved å kjøre =adb shell= uten
+argumenter.
+
+** Få ut data fra database
+
+*** Bruke skript
+
+I dette repoet finnes et skript (og en tilhørende lagret SQL-spørring)
+som kan brukes for å konvertere en database-dump fra Delver Lens til
+en kortliste i plaintekst. Evt kan du se instruksjoner for å gjøre det
+manuelt i seksjonen under.
+
+I WSL:
+
+#+begin_src sh
+  ./konverter-database.sh 2025_Jun_29_17-34_backup.dlens
+#+end_src
+
+Dette vil dumpe en kortliste til =2025_Jun_29_17-34_backup.txt= i et
+klartekst-format med antall og kortnavn. Dette formatet støttes av de
+fleste verktøy som brukes for deck-bygging og andre ting. Se siste
+seksjon i denne README-en for tips til hvordan bruke dataene.
+
+*** Manuelt gjennom Sqlite3
+
+Dette er akkurat det samme som skriptet over gjør.
+
+I WSL:
+
+Åpne databasen:
+
+#+begin_src sh
+  sqlite3 2025_Jun_29_17-34_backup.dlens
+#+end_src
+
+Denne SQL-spørringen henter ut og kombinerer data fra tabellene =cards=,
+=data_cards= og =data_names= og returnerer en liste med antall og
+kortnavn. Hvis det er flere rader for samme kort blir disse automatisk
+slått sammen og antallet summert.
+
+#+begin_src sql
+SELECT
+        SUM(quantity) AS 'Count',
+        data_names.name AS 'Name'
+    FROM cards, data_cards, data_names
+    WHERE cards.card == data_cards._id
+    AND data_cards.name = data_names._id
+    GROUP BY data_names.name;
+#+end_src
+
+
+* Bruke dataene
+
+Etter eksport så skal du sitte igjen med en liste over kort på et
+format som kan brukes på diverse nettsider, for eksempel [[https://moxfield.com][Moxfield]],
+[[https://archidekt.com/sandbox][Archidekt]], [[https://www.mtggoldfish.com][MTGGoldfish]], etc.
+
+De fleste slike verktøy bruker [[https://scryfall.io][Scryfall]] som backend for kortdata og
+disse verktøyene støtter derfor Scryfall sitt søkeformat som er
+dokumentert [[https://scryfall.com/docs/syntax][her]].
+
+Kortliste kan også importeres i spillklienten [[https://cockatrice.github.io/][Cockatrice]], og på sider
+for kjøp og salg av kort, f.eks [[https://cardkingdom.com/builder][Card Kingdom]].
